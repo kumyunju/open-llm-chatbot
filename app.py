@@ -3,6 +3,7 @@ from uuid import UUID
 import requests
 import streamlit as st
 from groq import APIError, Groq
+from bike_programs import answer_chat
 
 st.title("오픈소스 LLM 기반 분석 프로그램 운용 챗봇")
 
@@ -92,22 +93,13 @@ if message and message.strip():
     st.chat_message("user").write(message)
     user_entry = {"role": "user", "content": message}
 
-    try:
+        try:
         with st.spinner("답변을 작성하고 있어요…"):
             client = Groq(api_key=groq_key)
-            result = client.chat.completions.create(
-                model="openai/gpt-oss-20b",
-                messages=[
-                    {"role": "system", "content": "사용자의 질문에 한국어로 답해 주세요."},
-                    *history[-20:],
-                    user_entry,
-                ],
-            )
+            answer = answer_chat(client, history[-20:], user_entry)
     except APIError:
         st.error("모델에서 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.")
         st.stop()
-
-    answer = result.choices[0].message.content
     if not answer:
         st.warning("답변이 비어 있어요. 다시 물어봐 주세요.")
         st.stop()
