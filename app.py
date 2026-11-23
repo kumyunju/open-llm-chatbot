@@ -87,19 +87,19 @@ for entry in history:
     st.chat_message(entry["role"]).write(entry["content"])
 
 message = st.chat_input("메시지를 입력하세요", max_chars=4000)
-
 if message and message.strip():
     message = message.strip()
     st.chat_message("user").write(message)
     user_entry = {"role": "user", "content": message}
 
-        try:
+    try:
         with st.spinner("답변을 작성하고 있어요…"):
             client = Groq(api_key=groq_key)
             answer = answer_chat(client, history[-20:], user_entry)
     except APIError:
         st.error("모델에서 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.")
         st.stop()
+
     if not answer:
         st.warning("답변이 비어 있어요. 다시 물어봐 주세요.")
         st.stop()
@@ -107,7 +107,6 @@ if message and message.strip():
     st.chat_message("assistant").write(answer)
     assistant_entry = {"role": "assistant", "content": answer}
 
-    # 질문과 답변을 한 번에 저장해요.
     try:
         saved = requests.post(
             table_url,
@@ -119,5 +118,8 @@ if message and message.strip():
             timeout=10,
         )
         saved.raise_for_status()
+    except requests.RequestException:
+        st.warning("답변은 받았지만 이번 대화의 저장 여부를 확인하지 못했어요.")
+    
     except requests.RequestException:
         st.warning("답변은 받았지만 이번 대화의 저장 여부를 확인하지 못했어요.")
