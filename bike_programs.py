@@ -1,6 +1,6 @@
 import json
 import math
-
+import re
 
 LINEAR_DATA = [
     (0, 120), (2, 180), (4, 240), (6, 310), (8, 390),
@@ -66,7 +66,39 @@ PREDICTORS = {
 }
 
 
+def predict_from_message(text):
+    compact = "".join(text.split())
+    if not re.search(r"예측|몇대|대여량|계산|돌려", compact):
+        return None
+    if re.search(r"원리|방법|차이|왜|회귀식|기록|지난번|아까", compact):
+        return None
+
+    nonlinear = re.search(r"비선형|2차회귀|2차식|이차회귀|이차식", compact)
+    linear = re.search(r"(?<!비)선형회귀", compact)
+    if bool(nonlinear) == bool(linear):
+        return None
+
+    temperatures = re.findall(r"([+-]?\d+(?:\.\d+)?)(?:도|℃|°[Cc])", compact)
+    if len(temperatures) != 1:
+        return None
+
+    temperature = float(temperatures[0])
+    name = "predict_quadratic_bikes" if nonlinear else "predict_linear_bikes"
+    label, predict = PREDICTORS[name]
+
+    try:
+        count = predict(temperature)
+    except (ValueError, OverflowError):
+        return "예측할 섭씨 기온을 숫자로 알려주세요."
+
+    return f"{label} 프로그램으로 예측한 {temperature:g}°C의 자전거 대여량은 약 **{count:,}대**예요."
+
+
 def answer_chat(client, history, user_entry):
+    known_prediction = predict_from_message(user_entry["content"])
+    if known_prediction is not None:
+        return known_prediction
+
     system = (
         "한국어로 자연스럽게 대화해 주세요. "
         "사용자가 기존 프로그램으로 자전거 대여량 예측을 요청하면 해당 도구를 사용하세요. "
