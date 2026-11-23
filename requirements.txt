@@ -1,3 +1,5 @@
 streamlit>=1.51.0
 groq
 requests
+pandas
+scikit-learn
