@@ -86,7 +86,8 @@ except requests.RequestException:
     st.error("대화 기록을 불러오지 못했어요. Supabase 연결을 확인해 주세요.")
     st.stop()
 
-for entry in history:
+visible_history = st.session_state.setdefault("visible_history", [])
+for entry in visible_history:
     st.chat_message(entry["role"]).write(entry["content"])
 
 def load_activities(models, inputs, limit, day_offset):
