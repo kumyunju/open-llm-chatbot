@@ -137,7 +137,12 @@ def run_prediction(name, values, activity_log=None):
             "count": count,
         })
 
-    inputs = " · ".join(f"{INPUTS[key]} {values[key]:g}" for key in fields)
+        input_formats = {
+        "temperature": "기온 {:g}°C",
+        "humidity": "습도 {:g}%",
+        "wind_speed": "풍속 {:g} m/s",
+    }
+    inputs = " · ".join(input_formats[key].format(values[key]) for key in fields)
     return f"{label} 프로그램의 예측값은 약 **{count:,}대**예요.\n\n{inputs}"
 
 
