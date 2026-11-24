@@ -93,8 +93,24 @@ def read_values(text):
 
     return values
 
+PROJECT_NOTES = {
+    "predict_linear_bikes": (
+        "엑셀에서 기온과 자전거 대여량의 산점도와 직선 추세선을 만들고, "
+        "예제 데이터 18개로 선형회귀 웹 프로그램을 만들었어요."
+    ),
+    "predict_quadratic_bikes": (
+        "자전거 대여량이 줄었다가 다시 늘어나는 U자형 예제 데이터 "
+        "20개로 2차 회귀 웹 프로그램을 만들었어요."
+    ),
+    "predict_ann_bikes": (
+        "서울시 자전거 데이터 1,000개로 기온·습도·풍속을 입력받는 "
+        "인공신경망을 만들었어요. 은닉층 뉴런 수는 32개와 16개이고, "
+        "학습·평가 데이터는 80:20으로 나눴어요."
+    ),
+}
 
-def run_prediction(name, values):
+
+def run_prediction(name, values, activity_log=None):
     label, predict, fields = PROGRAMS[name]
     missing = [INPUTS[key] for key in fields if key not in values]
     if missing:
@@ -114,11 +130,18 @@ def run_prediction(name, values):
     except OverflowError:
         return "예측 입력값을 확인해 주세요."
 
+    if activity_log is not None:
+        activity_log.append({
+            "model": name,
+            "inputs": dict(zip(fields, args)),
+            "count": count,
+        })
+
     inputs = " · ".join(f"{INPUTS[key]} {values[key]:g}" for key in fields)
     return f"{label} 프로그램의 예측값은 약 **{count:,}대**예요.\n\n{inputs}"
 
 
-def answer_chat(client, history, user_entry):
+def answer_chat(client, history, user_entry, activity_log=None, load_activities=None):
     text = user_entry["content"]
     compact = "".join(text.lower().split())
     matches = [
@@ -127,32 +150,57 @@ def answer_chat(client, history, user_entry):
     ]
     values = read_values(text)
 
+    new_run = re.search(
+        r"예측해(?:줘|주세요|봐)|계산해(?:줘|주세요|봐)|실행해(?:줘|주세요|봐)|돌려",
+        compact,
+    )
+    past = re.search(r"지난번|저번|전에|아까|최근|이전|어제|오늘|저장한", compact)
+    log_query = re.search(r"기록|내역|이력|불러", compact)
+    result_query = re.search(r"결과|몇대|예측값", compact)
+    activity_topic = matches or re.search(
+        r"예측|대여량|분석활동|^(?:최근)?(?:기록|내역|이력)", compact
+    )
+
+    if load_activities and not new_run and activity_topic and (log_query or (past and result_query)):
+        number = re.search(r"(\d{1,3})(?:개|건)", compact)
+        limit = 5 if re.search(r"기록|목록|내역|이력", compact) else 1
+        if number:
+            limit = min(20, max(1, int(number[1])))
+        day_offset = -1 if "어제" in compact else 0 if "오늘" in compact else None
+        return load_activities(matches, values, limit, day_offset)
+
+    if not new_run and re.search(
+        r"만든프로그램|(?:어떤|무슨)프로그램을?만들|어떤분석활동|프로젝트활동|이전분석활동|세가지활동",
+        compact,
+    ):
+        return "\n\n".join(
+            f"**{PROGRAMS[name][0]}** · {PROJECT_NOTES[name]}"
+            for name in (matches or PROJECT_NOTES)
+        )
+
     if not re.search(
         r"원리|방법|차이|왜|회귀식|기록|지난번|설명|날씨|건조|따뜻|춥|더워", compact
     ):
         if len(matches) == 1 and re.search(r"예측|몇대|대여량|계산|돌려", compact):
-            return run_prediction(matches[0], values)
+            return run_prediction(matches[0], values, activity_log)
 
         if not matches and values and history:
             for name, (label, _, _) in PROGRAMS.items():
                 prefix = f"{label} 예측에 필요한 값을 알려주세요."
                 if not history[-1]["content"].startswith(prefix):
                     continue
-
                 for entry in reversed(history):
                     if entry["role"] == "assistant" and not entry["content"].startswith(prefix):
                         break
                     if entry["role"] == "user":
                         values = {**read_values(entry["content"]), **values}
-
-                return run_prediction(name, values)
+                return run_prediction(name, values, activity_log)
 
     system = (
         "한국어로 자연스럽게 대화하세요. 기존 프로그램으로 자전거 대여량 예측을 요청하면 "
         "지정한 모델의 도구를 사용하세요. 모델이나 입력값이 없으면 질문하세요. "
         "선형·비선형회귀는 기온, 인공신경망은 기온·습도·풍속이 필요해요."
     )
-
     result = client.chat.completions.create(
         model="openai/gpt-oss-20b",
         messages=[{"role": "system", "content": system}, *history, user_entry],
@@ -170,7 +218,8 @@ def answer_chat(client, history, user_entry):
                 args = json.loads(call.function.arguments)
             except (ValueError, TypeError):
                 args = {}
-
-            return run_prediction(call.function.name, args if isinstance(args, dict) else {})
+            return run_prediction(
+                call.function.name, args if isinstance(args, dict) else {}, activity_log
+            )
 
     return "사용할 예측 프로그램과 조건을 알려주세요."
