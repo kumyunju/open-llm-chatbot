@@ -89,18 +89,69 @@ except requests.RequestException:
 for entry in history:
     st.chat_message(entry["role"]).write(entry["content"])
 
+def load_activities(models, inputs, limit, day_offset):
+    params = {
+        "conversation_id": f"eq.{conversation_id}",
+        "role": "eq.assistant",
+        "activity": "not.is.null",
+        "select": "created_at,content",
+        "order": "id.desc",
+        "limit": limit,
+    }
+
+    if models:
+        params["activity->>model"] = "in.(" + ",".join(models) + ")"
+
+    if inputs:
+        try:
+            params["activity"] = "cs." + json.dumps({"inputs": inputs}, allow_nan=False)
+        except ValueError:
+            return "찾을 기록의 입력값을 확인해 주세요."
+
+    korea = timezone(timedelta(hours=9))
+    if day_offset is not None:
+        start = datetime.now(korea).replace(hour=0, minute=0, second=0, microsecond=0)
+        start += timedelta(days=day_offset)
+        end = start + timedelta(days=1)
+        params["and"] = f"(created_at.gte.{start.isoformat()},created_at.lt.{end.isoformat()})"
+
+    response = requests.get(table_url, headers=headers, params=params, timeout=10)
+    response.raise_for_status()
+    records = response.json()
+
+    if not records:
+        return "조건에 맞는 예측 활동 기록이 아직 없어요. 챗봇에서 예측을 실행하면 기록이 저장돼요."
+
+    results = []
+    for row in records:
+        saved_time = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+        date_label = saved_time.astimezone(korea).strftime("%Y-%m-%d %H:%M")
+        results.append(f"**{date_label}**\n\n{row['content']}")
+
+    return "저장된 예측 활동이에요.\n\n" + "\n\n---\n\n".join(results)
+
+
 message = st.chat_input("메시지를 입력하세요", max_chars=4000)
+
 if message and message.strip():
     message = message.strip()
     st.chat_message("user").write(message)
     user_entry = {"role": "user", "content": message}
+    activity_log = []
 
     try:
         with st.spinner("답변을 작성하고 있어요…"):
             client = Groq(api_key=groq_key)
-            answer = answer_chat(client, history[-20:], user_entry)
+            answer = answer_chat(
+                client, history[-20:], user_entry,
+                activity_log=activity_log,
+                load_activities=load_activities,
+            )
     except APIError:
         st.error("모델에서 답변을 가져오지 못했어요. 잠시 후 다시 시도해 주세요.")
+        st.stop()
+    except requests.RequestException:
+        st.error("저장된 예측 기록을 불러오지 못했어요. Supabase 연결을 확인해 주세요.")
         st.stop()
 
     if not answer:
@@ -115,14 +166,15 @@ if message and message.strip():
             table_url,
             headers={**headers, "Prefer": "return=minimal"},
             json=[
-                {"conversation_id": conversation_id, **entry}
-                for entry in (user_entry, assistant_entry)
+                {"conversation_id": conversation_id, "activity": None, **user_entry},
+                {
+                    "conversation_id": conversation_id,
+                    "activity": activity_log[0] if activity_log else None,
+                    **assistant_entry,
+                },
             ],
             timeout=10,
         )
         saved.raise_for_status()
-    except requests.RequestException:
-        st.warning("답변은 받았지만 이번 대화의 저장 여부를 확인하지 못했어요.")
-    
     except requests.RequestException:
         st.warning("답변은 받았지만 이번 대화의 저장 여부를 확인하지 못했어요.")
