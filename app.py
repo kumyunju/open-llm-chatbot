@@ -177,5 +177,6 @@ if message and message.strip():
             timeout=10,
         )
         saved.raise_for_status()
+        visible_history.extend([user_entry, assistant_entry])
     except requests.RequestException:
         st.warning("답변은 받았지만 이번 대화의 저장 여부를 확인하지 못했어요.")
